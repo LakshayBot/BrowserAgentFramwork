@@ -72,7 +72,7 @@ services:
       dockerfile: docker/web/Dockerfile.dev
     container_name: browser-agent-web
     environment:
-      - VITE_API_URL=http://localhost:8080
+      - VITE_API_URL=http://browser-agent-api:8080
     ports:
       - "5173:5173"
     volumes:
