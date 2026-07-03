@@ -1,0 +1,95 @@
+services:
+  browser-agent-postgres:
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+    container_name: browser-agent-postgres
+    environment:
+      POSTGRES_DB: browser_agent
+      POSTGRES_USER: browser_agent
+      POSTGRES_PASSWORD: browser_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - browser-agent-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U browser_agent -d browser_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  browser-agent-ai:
+    build:
+      context: .
+      dockerfile: docker/ai/Dockerfile
+    container_name: browser-agent-ai
+    environment:
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8000:8000"
+    networks:
+      - browser-agent-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  browser-agent-api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    container_name: browser-agent-api
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=browser-agent-postgres;Port=5432;Database=browser_agent;Username=browser_agent;Password=browser_agent
+      - AIService__BaseUrl=http://browser-agent-ai:8000
+      - Jwt__Secret=dev-secret-change-in-production-use-256-bit-key
+      - Encryption__Key=
+      - Storage__LocalPath=/app/storage
+    ports:
+      - "8080:8080"
+    volumes:
+      - document_storage:/app/storage
+    networks:
+      - browser-agent-network
+    depends_on:
+      browser-agent-postgres:
+        condition: service_healthy
+      browser-agent-ai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  browser-agent-web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile.dev
+    container_name: browser-agent-web
+    environment:
+      - VITE_API_URL=http://localhost:8080
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/web/src:/app/src
+    networks:
+      - browser-agent-network
+    depends_on:
+      browser-agent-api:
+        condition: service_healthy
+
+networks:
+  browser-agent-network:
+    driver: bridge
+    name: browser-agent-network
+
+volumes:
+  postgres_data:
+    name: browser-agent-postgres-data
+  document_storage:
+    name: browser-agent-document-storage
