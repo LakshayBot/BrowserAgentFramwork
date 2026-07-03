@@ -49,16 +49,15 @@ public class DocumentsController : ControllerBase
     /// Upload a resume or cover letter document.
     /// </summary>
     [HttpPost]
+    [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(ApiResponse<DocumentUploadResult>), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [RequestSizeLimit(11 * 1024 * 1024)]
-    public async Task<IActionResult> Upload(
-        [FromForm] IFormFile file,
-        [FromForm] string documentType,
-        CancellationToken ct)
+    public async Task<IActionResult> Upload([FromForm] DocumentUploadRequest request)
     {
+        var ct = HttpContext.RequestAborted;
         var userId = User.GetUserId();
-        var result = await _documentService.UploadAsync(userId, file, documentType, ct);
+        var result = await _documentService.UploadAsync(userId, request.File, request.DocumentType, ct);
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, ApiResponse<DocumentUploadResult>.Ok(result));
     }
 
