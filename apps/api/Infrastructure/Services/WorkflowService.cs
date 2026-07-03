@@ -14,17 +14,20 @@ public class WorkflowService : IWorkflowService
     private readonly AppDbContext _context;
     private readonly IWorkflowEventBus _eventBus;
     private readonly PluginLoader _pluginLoader;
+    private readonly WorkflowExecutor _executor;
     private readonly ILogger<WorkflowService> _logger;
 
     public WorkflowService(
         AppDbContext context,
         IWorkflowEventBus eventBus,
         PluginLoader pluginLoader,
+        WorkflowExecutor executor,
         ILogger<WorkflowService> logger)
     {
         _context = context;
         _eventBus = eventBus;
         _pluginLoader = pluginLoader;
+        _executor = executor;
         _logger = logger;
     }
 
@@ -89,6 +92,8 @@ public class WorkflowService : IWorkflowService
 
         _logger.LogInformation("Workflow started: {Id} with plugin: {Plugin}", id, plugin.Name);
         await _eventBus.PublishAsync("WorkflowStarted", workflow.Id, userId);
+
+        _executor.ExecuteBackground(workflow.Id, workflow.UserId);
 
         return await GetByIdAsync(id, userId, ct);
     }

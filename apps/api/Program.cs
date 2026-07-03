@@ -152,6 +152,7 @@ builder.Services.AddScoped<IDocumentService, DocumentService>();
 builder.Services.AddScoped<IWorkflowService, WorkflowService>();
 builder.Services.AddSingleton<IWorkflowEventBus, WorkflowEventBus>();
 builder.Services.AddSingleton<BrowserAgent.Api.Infrastructure.Services.HumanVerificationDetector>();
+builder.Services.AddSingleton<BrowserAgent.Api.Infrastructure.Services.WorkflowExecutor>();
 builder.Services.AddSingleton<BrowserAgent.Api.Plugins.JobApplication.JobApplicationPlugin>();
 builder.Services.AddSingleton<BrowserAgent.Api.Plugins.PluginLoader>(sp =>
 {
