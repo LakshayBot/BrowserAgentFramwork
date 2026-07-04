@@ -185,14 +185,11 @@ public class WorkflowsController : ControllerBase
     /// Get a screenshot captured during workflow execution.
     /// </summary>
     [HttpGet("{id:guid}/screenshots/{logId:guid}")]
+    [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetScreenshot(Guid id, Guid logId, CancellationToken ct)
     {
-        var userId = User.GetUserId();
-        var exists = await _db.Workflows.AnyAsync(x => x.Id == id && x.UserId == userId, ct);
-        if (!exists) return NotFound();
-
         var log = await _db.WorkflowLogs
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == logId && x.WorkflowId == id && x.ScreenshotPath != null, ct);
