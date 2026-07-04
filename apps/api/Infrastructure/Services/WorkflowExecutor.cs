@@ -569,6 +569,7 @@ public class WorkflowExecutor
                 {
                     ProviderType = defaultProvider.ProviderType,
                     ModelName = defaultProvider.ModelName,
+                    ApiKey = defaultProvider.ApiKey,
                     BaseUrl = defaultProvider.BaseUrl ?? "",
                     Temperature = defaultProvider.Temperature,
                     MaxTokens = defaultProvider.MaxTokens
