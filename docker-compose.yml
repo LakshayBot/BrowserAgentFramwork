@@ -47,7 +47,7 @@ services:
       - ConnectionStrings__DefaultConnection=Host=browser-agent-postgres;Port=5432;Database=browser_agent;Username=browser_agent;Password=browser_agent
       - AIService__BaseUrl=http://browser-agent-ai:8000
       - Jwt__Secret=dev-secret-change-in-production-use-256-bit-key
-      - Encryption__Key=
+      - Encryption__Key=GLjc4aw23ABZPaVcqsYs3Kerj3obZCa6U375HEfuL6k=
       - Storage__LocalPath=/app/storage
     ports:
       - "8080:8080"

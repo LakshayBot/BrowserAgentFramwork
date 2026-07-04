@@ -46,7 +46,14 @@ public class AiClient : IAiClient
         where TResponse : class
     {
         var response = await _httpClient.PostAsJsonAsync(path, request, SnakeCaseOptions, ct);
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError("AI service {Path} returned {StatusCode}: {Body}", path, (int)response.StatusCode, body);
+            throw new HttpRequestException($"AI service error ({path}): {body}");
+        }
+
         var result = await response.Content.ReadFromJsonAsync<TResponse>(SnakeCaseOptions, ct);
         return result ?? throw new InvalidOperationException($"Empty response from AI service: {path}");
     }

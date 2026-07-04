@@ -32,13 +32,14 @@ public class ProviderService : IProviderService
 
     public async Task<List<ProviderDto>> GetAllAsync(Guid userId, CancellationToken ct = default)
     {
-        return await _context.ProviderConfigs
+        var configs = await _context.ProviderConfigs
             .AsNoTracking()
             .Where(x => x.UserId == userId)
             .OrderByDescending(x => x.IsDefault)
             .ThenByDescending(x => x.CreatedAt)
-            .Select(x => MapToDto(x))
             .ToListAsync(ct);
+
+        return configs.Select(MapToDto).ToList();
     }
 
     public async Task<ProviderDto> GetByIdAsync(Guid id, Guid userId, CancellationToken ct = default)
@@ -267,8 +268,12 @@ public class ProviderService : IProviderService
         return body.Length > 200 ? body[..200] + "..." : body;
     }
 
-    private static ProviderDto MapToDto(ProviderConfig config)
+    private ProviderDto MapToDto(ProviderConfig config)
     {
+        string apiKey;
+        try { apiKey = _encryption.Decrypt(config.EncryptedApiKey); }
+        catch { apiKey = string.Empty; }
+
         return new ProviderDto
         {
             Id = config.Id,
@@ -278,6 +283,7 @@ public class ProviderService : IProviderService
             Temperature = config.Temperature,
             MaxTokens = config.MaxTokens,
             IsDefault = config.IsDefault,
+            ApiKey = apiKey,
             CreatedAt = config.CreatedAt
         };
     }

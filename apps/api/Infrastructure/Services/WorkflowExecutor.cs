@@ -73,6 +73,8 @@ public class WorkflowExecutor
                     wf.Status = WorkflowStatus.Failed;
                     wf.CompletedAt = DateTime.UtcNow;
                     wf.CurrentStep = "Failed";
+                    var msg = $"Workflow execution failed: {ex.Message}";
+                    if (msg.Length > 1900) msg = msg[..1900] + "...";
                     db.WorkflowLogs.Add(new WorkflowLog
                     {
                         Id = Guid.NewGuid(),
@@ -80,7 +82,7 @@ public class WorkflowExecutor
                         Timestamp = DateTime.UtcNow,
                         Level = "Error",
                         StepName = "Fatal",
-                        Message = $"Workflow execution failed: {ex.Message}",
+                        Message = msg,
                         Data = JsonSerializer.Serialize(new { error = ex.ToString() }, JsonOpts)
                     });
                     await db.SaveChangesAsync();

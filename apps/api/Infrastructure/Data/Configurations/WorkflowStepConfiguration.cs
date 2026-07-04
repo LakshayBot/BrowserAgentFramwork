@@ -13,8 +13,8 @@ public class WorkflowStepConfiguration : IEntityTypeConfiguration<WorkflowStep>
 
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedOnAdd();
-        builder.Property(x => x.StepName).IsRequired().HasMaxLength(200);
-        builder.Property(x => x.ErrorMessage).HasMaxLength(2000);
+        builder.Property(x => x.StepName).IsRequired().HasMaxLength(500);
+        builder.Property(x => x.ErrorMessage).HasMaxLength(5000);
         builder.Property(x => x.Status).HasConversion<int>();
 
         builder.HasOne(x => x.Workflow).WithMany(x => x.Steps).HasForeignKey(x => x.WorkflowId);
