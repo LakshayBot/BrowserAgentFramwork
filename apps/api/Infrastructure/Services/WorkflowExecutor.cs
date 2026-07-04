@@ -445,6 +445,10 @@ public class WorkflowExecutor
                     });
                 }
             }
+            else
+            {
+                AddLog("Warning", "AI", "AI field mapping skipped - no AI provider configured");
+            }
 
             // Check for next/submit buttons
             var nextButtons = page.Buttons.Where(b =>

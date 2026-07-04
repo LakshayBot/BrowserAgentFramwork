@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using BrowserAgent.Api.Application.DTOs.AI;
 using BrowserAgent.Api.Application.Interfaces;
 
@@ -6,6 +7,11 @@ namespace BrowserAgent.Api.Infrastructure.AI;
 
 public class AiClient : IAiClient
 {
+    private static readonly JsonSerializerOptions SnakeCaseOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+    };
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<AiClient> _logger;
 
@@ -39,9 +45,9 @@ public class AiClient : IAiClient
         where TRequest : class
         where TResponse : class
     {
-        var response = await _httpClient.PostAsJsonAsync(path, request, ct);
+        var response = await _httpClient.PostAsJsonAsync(path, request, SnakeCaseOptions, ct);
         response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<TResponse>(cancellationToken: ct);
+        var result = await response.Content.ReadFromJsonAsync<TResponse>(SnakeCaseOptions, ct);
         return result ?? throw new InvalidOperationException($"Empty response from AI service: {path}");
     }
 }
