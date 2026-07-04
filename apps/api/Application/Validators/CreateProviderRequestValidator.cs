@@ -9,7 +9,7 @@ public class CreateProviderRequestValidator : AbstractValidator<CreateProviderRe
     public CreateProviderRequestValidator()
     {
         RuleFor(x => x.ProviderType)
-            .IsInEnum().WithMessage("Invalid provider type. Supported: DeepSeek, Ollama");
+            .IsInEnum().WithMessage("Invalid provider type. Supported: DeepSeek, DeepSeekFlash, OpenAI, Ollama");
 
         RuleFor(x => x.ModelName)
             .NotEmpty().WithMessage("Model name is required")

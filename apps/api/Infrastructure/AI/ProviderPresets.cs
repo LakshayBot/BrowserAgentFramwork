@@ -11,7 +11,7 @@ public static class ProviderPresets
             "deepseek-chat",
             "deepseek-reasoner"
         }),
-        new("DeepSeek_V4_Flash", "DeepSeek Flash", "https://api.deepseek.com", new()
+        new("DeepSeekFlash", "DeepSeek Flash", "https://api.deepseek.com", new()
         {
             "deepseek-flash"
         }),
