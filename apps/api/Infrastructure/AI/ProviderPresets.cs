@@ -13,7 +13,7 @@ public static class ProviderPresets
         }),
         new("DeepSeekFlash", "DeepSeek Flash", "https://api.deepseek.com", new()
         {
-            "deepseek-flash"
+            "deepseek-chat"
         }),
         new("OpenAI", "OpenAI", "https://api.openai.com/v1", new()
         {

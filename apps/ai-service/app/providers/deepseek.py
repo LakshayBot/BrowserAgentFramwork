@@ -60,9 +60,10 @@ class DeepSeekProvider(BaseProvider):
             "max_tokens": config.max_tokens,
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
+            if not response.is_success:
+                raise ValueError(f"DeepSeek API {response.status_code}: {response.text[:500]}")
             data = response.json()
 
         choice = data["choices"][0]
