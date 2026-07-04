@@ -6,6 +6,7 @@ from .ollama import OllamaProvider
 class ProviderFactory:
     _providers: dict[str, type[BaseProvider]] = {
         "DeepSeek": DeepSeekProvider,
+        "DeepSeekFlash": DeepSeekProvider,
         "Ollama": OllamaProvider,
     }
 
