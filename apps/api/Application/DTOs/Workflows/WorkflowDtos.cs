@@ -29,6 +29,17 @@ public class WorkflowStepDto
     public string? ErrorMessage { get; set; }
 }
 
+public class WorkflowLogDto
+{
+    public Guid Id { get; set; }
+    public DateTime Timestamp { get; set; }
+    public string Level { get; set; } = string.Empty;
+    public string? StepName { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string? Data { get; set; }
+    public string? ScreenshotUrl { get; set; }
+}
+
 public class WorkflowSummaryDto
 {
     public Guid Id { get; set; }

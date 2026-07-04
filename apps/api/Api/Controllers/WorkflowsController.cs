@@ -1,8 +1,11 @@
 using BrowserAgent.Api.Application.DTOs.Workflows;
 using BrowserAgent.Api.Application.Interfaces;
+using BrowserAgent.Api.Domain.Entities;
 using BrowserAgent.Api.Domain.Exceptions;
+using BrowserAgent.Api.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace BrowserAgent.Api.Api.Controllers;
 
@@ -12,11 +15,13 @@ namespace BrowserAgent.Api.Api.Controllers;
 public class WorkflowsController : ControllerBase
 {
     private readonly IWorkflowService _workflowService;
+    private readonly AppDbContext _db;
     private readonly ILogger<WorkflowsController> _logger;
 
-    public WorkflowsController(IWorkflowService workflowService, ILogger<WorkflowsController> logger)
+    public WorkflowsController(IWorkflowService workflowService, AppDbContext db, ILogger<WorkflowsController> logger)
     {
         _workflowService = workflowService;
+        _db = db;
         _logger = logger;
     }
 
@@ -140,6 +145,65 @@ public class WorkflowsController : ControllerBase
         var userId = User.GetUserId();
         var result = await _workflowService.CancelAsync(id, userId, ct);
         return Ok(ApiResponse<WorkflowDto>.Ok(result));
+    }
+
+    /// <summary>
+    /// Get debug logs for a workflow.
+    /// </summary>
+    [HttpGet("{id:guid}/logs")]
+    [ProducesResponseType(typeof(ApiResponse<List<WorkflowLogDto>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetLogs(Guid id, [FromQuery] int limit = 100, CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        var exists = await _db.Workflows.AnyAsync(x => x.Id == id && x.UserId == userId, ct);
+        if (!exists) return NotFound();
+
+        var logs = await _db.WorkflowLogs
+            .AsNoTracking()
+            .Where(x => x.WorkflowId == id)
+            .OrderByDescending(x => x.Timestamp)
+            .Take(limit)
+            .OrderBy(x => x.Timestamp)
+            .Select(x => new WorkflowLogDto
+            {
+                Id = x.Id,
+                Timestamp = x.Timestamp,
+                Level = x.Level,
+                StepName = x.StepName,
+                Message = x.Message,
+                Data = x.Data,
+                ScreenshotUrl = x.ScreenshotPath != null
+                    ? $"/api/v1/workflows/{id}/screenshots/{x.Id}"
+                    : null
+            })
+            .ToListAsync(ct);
+
+        return Ok(ApiResponse<List<WorkflowLogDto>>.Ok(logs));
+    }
+
+    /// <summary>
+    /// Get a screenshot captured during workflow execution.
+    /// </summary>
+    [HttpGet("{id:guid}/screenshots/{logId:guid}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetScreenshot(Guid id, Guid logId, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        var exists = await _db.Workflows.AnyAsync(x => x.Id == id && x.UserId == userId, ct);
+        if (!exists) return NotFound();
+
+        var log = await _db.WorkflowLogs
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == logId && x.WorkflowId == id && x.ScreenshotPath != null, ct);
+
+        if (log?.ScreenshotPath is null) return NotFound();
+
+        if (!System.IO.File.Exists(log.ScreenshotPath))
+            return NotFound("Screenshot file not found on disk.");
+
+        var contentType = "image/png";
+        return PhysicalFile(log.ScreenshotPath, contentType);
     }
 
     /// <summary>

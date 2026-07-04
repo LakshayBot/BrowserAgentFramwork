@@ -21,6 +21,7 @@ public class AppDbContext : DbContext
     public DbSet<BrowserSession> BrowserSessions => Set<BrowserSession>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<WorkflowLog> WorkflowLogs => Set<WorkflowLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

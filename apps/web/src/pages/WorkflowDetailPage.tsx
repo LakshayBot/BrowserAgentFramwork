@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { ArrowLeft, Play, Pause, RotateCcw, XCircle } from 'lucide-react';
+import WorkflowDebugPanel from '@/components/WorkflowDebugPanel';
 
 interface Step {
   stepNumber: number; stepName: string; status: string; errorMessage?: string;
@@ -101,6 +102,11 @@ export default function WorkflowDetailPage() {
           ))}
         </div>
       </div>
+
+      <WorkflowDebugPanel
+        workflowId={id!}
+        isActive={wf.status === 'Running' || wf.status === 'Paused'}
+      />
     </div>
   );
 }
