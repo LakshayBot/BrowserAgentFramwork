@@ -1,6 +1,8 @@
 using System.Text.Json;
 using BrowserAgent.Api.Application.DTOs.AI;
+using BrowserAgent.Api.Application.DTOs.Documents;
 using BrowserAgent.Api.Application.DTOs.Profile;
+using BrowserAgent.Api.Application.DTOs.Providers;
 using BrowserAgent.Api.Application.Interfaces;
 using BrowserAgent.Api.Browser.BrowserManager;
 using BrowserAgent.Api.Browser.Interfaces;
@@ -357,146 +359,111 @@ public class WorkflowExecutor
             AddLog("Debug", "Forms", "Extracting form fields...");
 
             var forms = page.Forms;
-            if (forms.Count == 0)
+
+            var profile = await userService.GetProfileAsync(userId);
+            var profileJson = JsonSerializer.Serialize(profile);
+            var documents = await docService.GetAllAsync(userId);
+            var resume = documents.FirstOrDefault(d => d.DocumentType == "Resume");
+            var providers = await providerService.GetAllAsync(userId);
+            var defaultProvider = providers.FirstOrDefault(p => p.IsDefault) ?? providers.FirstOrDefault();
+
+            if (forms.Count == 0 && analysis.Type == PageType.ApplicationForm && defaultProvider is not null)
+            {
+                wf.CurrentStep = "AI analyzing page HTML";
+                await SaveAsync(db, wf);
+                AddLog("Debug", "AI", "No structured forms - capturing page HTML for AI analysis...");
+
+                string? pageHtml = null;
+                if (_browserManager is PlaywrightSessionManager pmHtml)
+                {
+                    var sessionHtml = pmHtml.GetSession(sessionId);
+                    if (sessionHtml is not null)
+                    {
+                        try { pageHtml = await sessionHtml.Page.ContentAsync(); }
+                        catch (Exception ex) { _logger.LogWarning(ex, "Failed to capture HTML"); }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(pageHtml))
+                {
+                    AddLog("Debug", "AI", $"Page HTML captured ({pageHtml.Length} chars) - sending to AI");
+
+                    await TryAiFieldMappingAsync(db, wf, url, pageHtml, null, profileJson, resume, defaultProvider, sessionId);
+                    await db.SaveChangesAsync();
+                    stepCounter = await db.WorkflowSteps
+                        .Where(x => x.WorkflowId == workflowId)
+                        .MaxAsync(x => (int?)x.StepNumber) ?? stepCounter;
+
+                    if (wf.Status == WorkflowStatus.Completed)
+                        return;
+                }
+                else
+                {
+                    AddStepLocal( "No forms found on page");
+                    wf.Status = WorkflowStatus.Completed;
+                    wf.CompletedAt = DateTime.UtcNow;
+                    wf.CurrentStep = "No forms on page";
+                    AddLog("Warning", "Forms", "HTML capture failed, no forms to fill");
+                    await SaveAsync(db, wf);
+                    return;
+                }
+            }
+            else if (forms.Count == 0)
             {
                 AddStepLocal( "No forms found on page");
                 wf.Status = WorkflowStatus.Completed;
                 wf.CompletedAt = DateTime.UtcNow;
                 wf.CurrentStep = "No forms on page";
                 var ssNoForm = await CaptureScreenshot();
-                AddLog("Warning", "Forms", "No forms detected on page", screenshotPath: ssNoForm);
+
+                if (analysis.Type == PageType.ApplicationForm)
+                    AddLog("Warning", "Forms", "Application form detected but no fields extracted. Configure an AI provider for HTML-based analysis.", screenshotPath: ssNoForm);
+                else
+                    AddLog("Warning", "Forms", "No forms detected on page", screenshotPath: ssNoForm);
+
                 await SaveAsync(db, wf);
                 return;
             }
 
-            var form = forms[0];
-            AddStepLocal( $"Form extracted: {form.Fields.Count} fields");
-
-            AddLog("Info", "Forms", "Form extracted", new
+            var form = forms.FirstOrDefault();
+            if (form is not null)
             {
-                formId = form.FormId,
-                formName = form.FormName,
-                fieldCount = form.Fields.Count,
-                fields = form.Fields.Select(f => new
+                AddStepLocal( $"Form extracted: {form.Fields.Count} fields");
+
+                AddLog("Info", "Forms", "Form extracted", new
                 {
-                    id = f.Id,
-                    label = f.Label,
-                    placeholder = f.Placeholder,
-                    type = f.FieldType,
-                    required = f.Required,
-                    disabled = f.Disabled,
-                    currentValue = f.CurrentValue,
-                    options = f.AvailableOptions
-                })
-            });
-
-            // Get user profile
-            var profile = await userService.GetProfileAsync(userId);
-            var profileJson = JsonSerializer.Serialize(profile);
-
-            // Get documents
-            var documents = await docService.GetAllAsync(userId);
-            var resume = documents.FirstOrDefault(d => d.DocumentType == "Resume");
-
-            // Get default provider
-            var providers = await providerService.GetAllAsync(userId);
-            var defaultProvider = providers.FirstOrDefault(p => p.IsDefault) ?? providers.FirstOrDefault();
-
-            if (defaultProvider is not null && form.Fields.Count > 0)
-            {
-                wf.CurrentStep = "AI field mapping";
-                await SaveAsync(db, wf);
-                AddLog("Debug", "AI", "Calling AI service for field mapping...", new
-                {
-                    provider = defaultProvider.ProviderType.ToString(),
-                    model = defaultProvider.ModelName,
-                    fieldCount = form.Fields.Count
+                    formId = form.FormId,
+                    formName = form.FormName,
+                    fieldCount = form.Fields.Count,
+                    fields = form.Fields.Select(f => new
+                    {
+                        id = f.Id, label = f.Label, placeholder = f.Placeholder,
+                        type = f.FieldType, required = f.Required, disabled = f.Disabled,
+                        currentValue = f.CurrentValue, options = f.AvailableOptions
+                    })
                 });
 
-                try
+                if (defaultProvider is not null && form.Fields.Count > 0)
                 {
-                    var fieldMap = await _aiClient.MapFieldsAsync(new FieldMapRequest
-                    {
-                        PageSchema = new Dictionary<string, object> { ["url"] = url },
-                        FormSchema = new Dictionary<string, object> { ["fields"] = form.Fields.Select(f => new {
-                            id = f.Id, label = f.Label, type = f.FieldType, required = f.Required
-                        }).ToList() },
-                        Profile = JsonSerializer.Deserialize<Dictionary<string, object>>(profileJson) ?? new(),
-                        Resume = resume is not null ? new Dictionary<string, object> { ["name"] = resume.DisplayName } : new(),
-                        Provider = new ProviderConfigDto
-                        {
-                            ProviderType = defaultProvider.ProviderType,
-                            ModelName = defaultProvider.ModelName,
-                            BaseUrl = defaultProvider.BaseUrl ?? "",
-                            Temperature = defaultProvider.Temperature,
-                            MaxTokens = defaultProvider.MaxTokens
-                        }
-                    });
-
-                    AddStepLocal( $"AI mapped {fieldMap.Mappings.Count} fields (conf: {fieldMap.ConfidenceOverall:F2})");
-
-                    AddLog("Info", "AI", "AI field mapping complete", new
-                    {
-                        confidenceOverall = fieldMap.ConfidenceOverall,
-                        mappings = fieldMap.Mappings.Select(m => new
-                        {
-                            fieldId = m.FieldId,
-                            value = m.Value,
-                            confidence = m.Confidence,
-                            source = m.Source
-                        }),
-                        usedFields = fieldMap.Mappings.Count(m => m.Confidence > 0.3)
-                    });
-
-                    // Step 8: Fill form fields
-                    wf.CurrentStep = "Filling form";
+                    wf.CurrentStep = "AI field mapping";
                     await SaveAsync(db, wf);
-                    AddLog("Debug", "AI", "Filling form fields...");
-
-                    int filledCount = 0;
-                    foreach (var mapping in fieldMap.Mappings.Where(m => m.Confidence > 0.3))
+                    AddLog("Debug", "AI", "Calling AI for structured field mapping...", new
                     {
-                        if (string.IsNullOrEmpty(mapping.Value)) continue;
-                        var field = form.Fields.FirstOrDefault(f => f.Id == mapping.FieldId);
-                        if (field is null) continue;
-
-                        try
-                        {
-                            if (field.FieldType is "select" or "dropdown")
-                                await _interaction.SelectAsync(sessionId, $"#{field.Id}", mapping.Value);
-                            else
-                                await _interaction.TypeAsync(sessionId, $"#{field.Id}", mapping.Value);
-                            filledCount++;
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to fill field {FieldId}", mapping.FieldId);
-                        }
-                    }
-
-                    AddStepLocal( $"Form filled: {filledCount} fields");
-                    AddLog("Info", "AI", $"Form filled with {filledCount} field values");
-
-                    var ssFilled = await CaptureScreenshot();
-                    if (ssFilled is not null)
-                    {
-                    AddLog("Info", "Screenshot", "Form after filling", screenshotPath: ssFilled);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "AI field mapping failed, continuing without AI");
-                    AddStepLocal( "AI mapping failed - continuing");
-                    AddLog("Error", "AI", "AI field mapping failed", new
-                    {
-                        error = ex.Message,
-                        fallback = "Continuing without AI field mapping"
+                        provider = defaultProvider.ProviderType.ToString(),
+                        model = defaultProvider.ModelName,
+                        fieldCount = form.Fields.Count
                     });
+
+                    await TryAiFieldMappingAsync(db, wf, url, null, form, profileJson, resume, defaultProvider, sessionId);
+                    await db.SaveChangesAsync();
+                    stepCounter = await db.WorkflowSteps
+                        .Where(x => x.WorkflowId == workflowId)
+                        .MaxAsync(x => (int?)x.StepNumber) ?? stepCounter;
                 }
-            }
-            else
-            {
-                AddLog("Warning", "AI", "AI field mapping skipped - no AI provider configured");
+                else
+                {
+                    AddLog("Warning", "AI", "AI field mapping skipped - no AI provider configured");
+                }
             }
 
             // Check for next/submit buttons
@@ -548,6 +515,140 @@ public class WorkflowExecutor
                 try { await _browserManager.CloseAsync(sessionId); }
                 catch { }
             }
+        }
+    }
+
+    private async Task TryAiFieldMappingAsync(
+        AppDbContext db, Workflow wf, string url,
+        string? pageHtml, ExtractedForm? form,
+        string profileJson, DocumentDto? resume,
+        ProviderDto defaultProvider, string? sessionId)
+    {
+        var stepNum = await db.WorkflowSteps
+            .Where(x => x.WorkflowId == wf.Id)
+            .MaxAsync(x => (int?)x.StepNumber) ?? 0;
+
+        void AddStep(string name)
+        {
+            stepNum++;
+            db.WorkflowSteps.Add(new WorkflowStep
+            {
+                Id = Guid.NewGuid(), WorkflowId = wf.Id, StepNumber = stepNum,
+                StepName = name, Status = StepStatus.Completed,
+                StartedAt = DateTime.UtcNow, CompletedAt = DateTime.UtcNow
+            });
+        }
+
+        void AddLogEntry(string level, string stepName, string message, object? data = null, string? screenshotPath = null)
+        {
+            db.WorkflowLogs.Add(new WorkflowLog
+            {
+                Id = Guid.NewGuid(), WorkflowId = wf.Id, Timestamp = DateTime.UtcNow,
+                Level = level, StepName = stepName, Message = message,
+                Data = data is not null ? JsonSerializer.Serialize(data, JsonOpts) : null,
+                ScreenshotPath = screenshotPath
+            });
+        }
+
+        try
+        {
+            var request = new FieldMapRequest
+            {
+                PageHtml = pageHtml ?? "",
+                PageSchema = new Dictionary<string, object> { ["url"] = url },
+                FormSchema = form is not null
+                    ? new Dictionary<string, object> { ["fields"] = form.Fields.Select(f => new {
+                        id = f.Id, label = f.Label, type = f.FieldType, required = f.Required
+                    }).ToList() }
+                    : new Dictionary<string, object>(),
+                Profile = JsonSerializer.Deserialize<Dictionary<string, object>>(profileJson) ?? new(),
+                Resume = resume is not null ? new Dictionary<string, object> { ["name"] = resume.DisplayName } : new(),
+                Provider = new ProviderConfigDto
+                {
+                    ProviderType = defaultProvider.ProviderType,
+                    ModelName = defaultProvider.ModelName,
+                    BaseUrl = defaultProvider.BaseUrl ?? "",
+                    Temperature = defaultProvider.Temperature,
+                    MaxTokens = defaultProvider.MaxTokens
+                }
+            };
+
+            var fieldMap = await _aiClient.MapFieldsAsync(request);
+
+            AddStep( $"AI mapped {fieldMap.Mappings.Count} fields (conf: {fieldMap.ConfidenceOverall:F2})");
+
+            AddLogEntry("Info", "AI", "AI field mapping complete", new
+            {
+                confidenceOverall = fieldMap.ConfidenceOverall,
+                mappings = fieldMap.Mappings.Select(m => new
+                {
+                    fieldId = m.FieldId, selector = m.Selector,
+                    value = m.Value, confidence = m.Confidence, source = m.Source
+                }),
+                usedFields = fieldMap.Mappings.Count(m => m.Confidence > 0.3)
+            });
+
+            wf.CurrentStep = "Filling form";
+            await db.SaveChangesAsync();
+
+            AddLogEntry("Debug", "AI", "Filling form fields...");
+
+            int filledCount = 0;
+            foreach (var mapping in fieldMap.Mappings.Where(m => m.Confidence > 0.3))
+            {
+                if (string.IsNullOrEmpty(mapping.Value)) continue;
+
+                var selector = !string.IsNullOrEmpty(mapping.Selector)
+                    ? mapping.Selector
+                    : form?.Fields.FirstOrDefault(f => f.Id == mapping.FieldId) is { } matched
+                        ? $"#{matched.Id}"
+                        : null;
+
+                if (selector is null) continue;
+
+                try
+                {
+                    var field = form?.Fields.FirstOrDefault(f => f.Id == mapping.FieldId);
+                    if (field?.FieldType is "select" or "dropdown")
+                        await _interaction.SelectAsync(sessionId, selector, mapping.Value);
+                    else
+                        await _interaction.TypeAsync(sessionId, selector, mapping.Value);
+                    filledCount++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to fill field {FieldId} via selector {Selector}", mapping.FieldId, selector);
+                }
+            }
+
+            AddStep( $"Form filled: {filledCount} fields");
+            AddLogEntry("Info", "AI", $"Form filled with {filledCount} field values");
+
+            string? ssFilled = null;
+            if (sessionId is not null)
+            {
+                try
+                {
+                    var fileName = $"wf_{wf.Id:N}_{DateTime.UtcNow:yyyyMMddHHmmssfff}.png";
+                    ssFilled = await _screenshots.CaptureAsync(sessionId, fileName);
+                }
+                catch { }
+            }
+            if (ssFilled is not null)
+            {
+                AddLogEntry("Info", "Screenshot", "Form after filling", screenshotPath: ssFilled);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI field mapping failed");
+
+            AddStep( "AI mapping failed - continuing");
+            AddLogEntry("Error", "AI", "AI field mapping failed", new
+            {
+                error = ex.Message,
+                fallback = "Continuing without AI field mapping"
+            });
         }
     }
 

@@ -19,15 +19,26 @@ class FieldMapper(BaseAIService):
         )
 
         provider = self._get_provider(provider_config)
-        system_prompt = self._load_prompt("field_mapping")
 
-        user_prompt = (
-            f"{system_prompt}\n\n"
-            f"Page Structure:\n{json.dumps(request.page_schema, indent=2)}\n\n"
-            f"Form Fields:\n{json.dumps(request.form_schema, indent=2)}\n\n"
-            f"User Profile:\n{json.dumps(request.profile, indent=2)}\n\n"
-            f"Resume Data:\n{json.dumps(request.resume, indent=2)}"
-        )
+        if request.page_html:
+            system_prompt = self._load_prompt("field_mapping_html")
+            user_prompt = (
+                f"{system_prompt}\n\n"
+                f"=== PAGE HTML ===\n{request.page_html}\n\n"
+                f"=== USER PROFILE ===\n{json.dumps(request.profile, indent=2)}\n\n"
+                f"=== RESUME ===\n{json.dumps(request.resume, indent=2)}\n\n"
+                f"Analyze the HTML above, identify all form fields (inputs, selects, textareas, etc.), "
+                f"provide a unique CSS selector for each one, and map the user's profile/resume data to them."
+            )
+        else:
+            system_prompt = self._load_prompt("field_mapping")
+            user_prompt = (
+                f"{system_prompt}\n\n"
+                f"Page Structure:\n{json.dumps(request.page_schema, indent=2)}\n\n"
+                f"Form Fields:\n{json.dumps(request.form_schema, indent=2)}\n\n"
+                f"User Profile:\n{json.dumps(request.profile, indent=2)}\n\n"
+                f"Resume Data:\n{json.dumps(request.resume, indent=2)}"
+            )
 
         try:
             result = await provider.structured(user_prompt, FieldMapResponse, provider_config)

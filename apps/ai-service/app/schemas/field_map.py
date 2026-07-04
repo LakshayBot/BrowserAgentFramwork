@@ -4,8 +4,9 @@ from .provider import ProviderConfigRequest
 
 
 class FieldMapRequest(BaseModel):
-    page_schema: dict = Field(..., description="Extracted page structure")
-    form_schema: dict = Field(..., description="Extracted form fields")
+    page_schema: dict = Field(default_factory=dict, description="Extracted page structure")
+    form_schema: dict = Field(default_factory=dict, description="Extracted form fields")
+    page_html: str = Field(default="", description="Raw page HTML for AI to parse")
     profile: dict = Field(..., description="User profile data")
     resume: dict = Field(..., description="Parsed resume data")
     provider: ProviderConfigRequest
@@ -13,6 +14,7 @@ class FieldMapRequest(BaseModel):
 
 class FieldMapping(BaseModel):
     field_id: str = ""
+    selector: str = ""
     value: str = ""
     confidence: float = 0.0
     source: str = ""
