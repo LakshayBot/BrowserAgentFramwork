@@ -110,7 +110,11 @@ public class ProviderService : IProviderService
 
     public async Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default)
     {
-        var config = await GetOwnedConfigAsync(id, userId, ct);
+        var config = await _context.ProviderConfigs
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
+
+        if (config is null) return;
+
         _context.ProviderConfigs.Remove(config);
         await _context.SaveChangesAsync(ct);
 
