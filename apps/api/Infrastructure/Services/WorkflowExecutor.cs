@@ -2,10 +2,12 @@ using System.Text.Json;
 using BrowserAgent.Api.Application.DTOs.AI;
 using BrowserAgent.Api.Application.DTOs.Profile;
 using BrowserAgent.Api.Application.Interfaces;
+using BrowserAgent.Api.Browser.BrowserManager;
 using BrowserAgent.Api.Browser.Interfaces;
 using BrowserAgent.Api.Domain.Entities;
 using BrowserAgent.Api.Domain.Enums;
 using BrowserAgent.Api.Infrastructure.Data;
+using Microsoft.Playwright;
 using BrowserAgent.Api.Plugins;
 using BrowserAgent.Api.Plugins.JobApplication;
 using Microsoft.EntityFrameworkCore;
@@ -223,39 +225,83 @@ public class WorkflowExecutor
                 await SaveAsync(db, wf);
                 AddLog("Debug", "Apply", "Looking for apply button...");
 
-                // Try common apply button locators
+                // Try common apply button locators with fast 5s timeouts
                 var applySelectors = new[] {
-                    "button:has-text('Apply')",
-                    "a:has-text('Apply Now')",
-                    "button:has-text('I'm Interested')",
+                    "text=Apply Now",
+                    "text=Apply now",
                     "a:has-text('Apply')",
+                    "button:has-text('Apply')",
+                    "button:has-text('I'm Interested')",
+                    "a:has-text('I am interested')",
+                    "[data-automation-id*=apply]",
+                    ".apply-button",
+                    ".btn-apply",
                 };
 
                 bool clicked = false;
-                foreach (var sel in applySelectors)
+
+                if (_browserManager is PlaywrightSessionManager pm)
                 {
-                    var result = await _interaction.ClickAsync(sessionId, sel);
-                    if (result.Success) { clicked = true; break; }
-                }
-
-                if (clicked)
-                {
-                    AddLog("Info", "Apply", "Apply button clicked");
-                    await Task.Delay(2000);
-                    await _navigation.NavigateAsync(sessionId, url);
-                    AddStepLocal( "Apply button clicked");
-
-                    var ssApply = await CaptureScreenshot();
-                    page = await _extractor.ExtractPageAsync(sessionId);
-                    analysis = analyzer.Analyze(page, url);
-
-                    AddLog("Info", "Apply", "Page re-analyzed after apply click", new
+                    var session = pm.GetSession(sessionId);
+                    if (session is not null)
                     {
-                        pageType = analysis.Type.ToString(),
-                        description = analysis.Description
-                    }, screenshotPath: ssApply);
+                        var popupTcs = new TaskCompletionSource<IPage>();
+                        session.Page.Popup += (_, popup) => popupTcs.TrySetResult(popup);
+
+                        foreach (var sel in applySelectors)
+                        {
+                            try
+                            {
+                                await session.Page.ClickAsync(sel, new PageClickOptions { Timeout = 5000 });
+                                clicked = true;
+                                AddLog("Debug", "Apply", $"Clicked apply: {sel}");
+                                break;
+                            }
+                            catch { }
+                        }
+
+                        if (clicked && popupTcs.Task.IsCompletedSuccessfully)
+                        {
+                            var popup = popupTcs.Task.Result;
+                            pm.SwitchPage(sessionId, popup);
+                            AddLog("Debug", "Apply", $"Popup window detected: {popup.Url}");
+                        }
+
+                        if (clicked)
+                        {
+                            AddLog("Info", "Apply", $"Apply button clicked, waiting for page load...");
+
+                            try { await session.Page.WaitForLoadStateAsync(LoadState.NetworkIdle, new PageWaitForLoadStateOptions { Timeout = 15000 }); }
+                            catch { try { await session.Page.WaitForLoadStateAsync(LoadState.DOMContentLoaded); } catch { } }
+
+                            await Task.Delay(3000);
+
+                            try { await session.Page.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight)"); }
+                            catch { }
+                            await Task.Delay(1500);
+                            try { await session.Page.EvaluateAsync("window.scrollTo(0, 0)"); }
+                            catch { }
+                            await Task.Delay(2000);
+                            AddStepLocal( "Apply button clicked");
+
+                            var newUrl = session.Page.Url;
+                            if (!string.IsNullOrEmpty(newUrl)) url = newUrl;
+
+                            var ssApply = await CaptureScreenshot();
+                            page = await _extractor.ExtractPageAsync(sessionId);
+                            analysis = analyzer.Analyze(page, url);
+
+                            AddLog("Info", "Apply", "Page re-analyzed after apply click", new
+                            {
+                                currentUrl = session.Page.Url,
+                                pageType = analysis.Type.ToString(),
+                                description = analysis.Description
+                            }, screenshotPath: ssApply);
+                        }
+                    }
                 }
-                else
+
+                if (!clicked)
                 {
                     AddStepLocal( "No apply button found - continuing with current page");
                     AddLog("Warning", "Apply", "No apply button found on page", new
@@ -314,6 +360,9 @@ public class WorkflowExecutor
             if (forms.Count == 0)
             {
                 AddStepLocal( "No forms found on page");
+                wf.Status = WorkflowStatus.Completed;
+                wf.CompletedAt = DateTime.UtcNow;
+                wf.CurrentStep = "No forms on page";
                 var ssNoForm = await CaptureScreenshot();
                 AddLog("Warning", "Forms", "No forms detected on page", screenshotPath: ssNoForm);
                 await SaveAsync(db, wf);

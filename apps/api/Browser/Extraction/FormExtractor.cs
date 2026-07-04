@@ -42,6 +42,17 @@ public class FormExtractor : IFormExtractor
             var buttons = JsonSerializer.Deserialize<List<ButtonData>>(buttonsResult.GetRawText()) ?? new();
             var forms = ParseForms(formsResult);
 
+            if (forms.Count == 0)
+            {
+                var formlessFields = await page.EvaluateAsync<JsonElement>(GetFormlessFieldsScript());
+                forms = ParseFormlessFields(formlessFields);
+            }
+
+            if (forms.Count == 0)
+            {
+                forms = await ExtractFromFrames(sessionId, page, ct);
+            }
+
             _logger.LogInformation("[{SessionId}] Page extracted: {Forms} forms, {Buttons} buttons",
                 sessionId, forms.Count, buttons.Count);
 
@@ -146,13 +157,38 @@ public class FormExtractor : IFormExtractor
         """;
 
     private static string GetButtonsScript() => """
-        Array.from(document.querySelectorAll('button, input[type=submit], input[type=button], a[role=button]'))
-            .map(el => ({
-                text: el.textContent?.trim() || el.value || '',
-                type: el.type || 'button',
-                visible: el.offsetParent !== null,
-                enabled: !el.disabled
-            }))
+        (() => {
+            const results = [];
+            const seen = new Set();
+            const add = (el) => {
+                const id = el.outerHTML?.substring(0, 200);
+                if (!id || seen.has(id)) return;
+                seen.add(id);
+                const text = (el.textContent || el.value || el.getAttribute('aria-label') || el.title || '').trim();
+                const tag = el.tagName.toLowerCase();
+                results.push({
+                    text: text,
+                    type: tag === 'a' ? 'link' : (el.type || tag),
+                    visible: el.offsetParent !== null,
+                    enabled: !el.disabled,
+                    tag: tag,
+                    href: el.href || ''
+                });
+            };
+
+            document.querySelectorAll('button, input[type=submit], input[type=button], [role=button]').forEach(add);
+            document.querySelectorAll('a[href]').forEach(el => {
+                const text = (el.textContent || '').trim();
+                if (text && (
+                    /\b(apply|submit|login|sign.?in|register|create.account|upload|next|continue|save|proceed|i.?m.?interested)\b/i.test(text) ||
+                    /apply|submit|btn|button|cta/i.test(el.className || '')
+                )) {
+                    add(el);
+                }
+            });
+
+            return results;
+        })()
         """;
 
     private static string GetFormsScript() => """
@@ -178,6 +214,85 @@ public class FormExtractor : IFormExtractor
             })
         }))
         """;
+
+    private static string GetFormlessFieldsScript() => """
+        (() => {
+            const fields = [];
+            const inputs = document.querySelectorAll('input, select, textarea');
+            const parentForm = (el) => el.closest('form') ?? null;
+
+            inputs.forEach(input => {
+                if (parentForm(input)) return;
+                const tag = input.tagName;
+                const labelEl = input.closest('label');
+                let labelText = input.getAttribute('aria-label') || input.placeholder || '';
+                if (!labelText && labelEl) labelText = labelEl.textContent?.trim() || '';
+                if (!labelText && input.id) {
+                    const lbl = document.querySelector('label[for="' + input.id + '"]');
+                    if (lbl) labelText = lbl.textContent?.trim() || '';
+                }
+
+                fields.push({
+                    id: input.id || input.name || 'field_' + Math.random().toString(36).slice(2, 8),
+                    label: labelText,
+                    placeholder: input.getAttribute('placeholder') || '',
+                    type: input.type || (tag === 'TEXTAREA' ? 'textarea' : tag === 'SELECT' ? 'select' : 'text'),
+                    required: input.required || input.getAttribute('aria-required') === 'true',
+                    disabled: input.disabled || input.readOnly,
+                    readonly: input.readOnly,
+                    options: tag === 'SELECT' ? Array.from(input.options).map(o => o.text?.trim()).filter(Boolean) : [],
+                    currentValue: input.value || ''
+                });
+            });
+
+            return [{
+                formId: '_page_scan',
+                formName: 'Page-level form fields (no <form> tags)',
+                fields: fields
+            }];
+        })()
+        """;
+
+    private List<ExtractedForm> ParseFormlessFields(JsonElement fieldsResult)
+    {
+        return ParseForms(fieldsResult);
+    }
+
+    private async Task<List<ExtractedForm>> ExtractFromFrames(string sessionId, IPage mainPage, CancellationToken ct)
+    {
+        var allForms = new List<ExtractedForm>();
+
+        foreach (var frame in mainPage.Frames)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                if (frame == mainPage.MainFrame) continue;
+                var formsResult = await frame.EvaluateAsync<JsonElement>(GetFormsScript());
+                var frameForms = ParseForms(formsResult);
+
+                if (frameForms.Count == 0)
+                {
+                    var formless = await frame.EvaluateAsync<JsonElement>(GetFormlessFieldsScript());
+                    frameForms = ParseFormlessFields(formless);
+                }
+
+                if (frameForms.Count > 0)
+                {
+                    _logger.LogInformation("[{SessionId}] Found {Count} forms in iframe: {Url}",
+                        sessionId, frameForms.Count, frame.Url);
+                }
+
+                allForms.AddRange(frameForms);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[{SessionId}] Frame extraction skipped: {Url}", sessionId, frame.Url);
+            }
+        }
+
+        return allForms;
+    }
 
     private class ButtonData
     {

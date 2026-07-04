@@ -37,10 +37,11 @@ public class PageAnalyzer
         var analysis = new PageAnalysis();
 
         var buttonsText = string.Join(" ", page.Buttons.Select(b => (b.Text ?? "").ToLowerInvariant()));
-        var allText = (string.Join(" ", page.Headings) + " " + buttonsText + " " + string.Join(" ", page.Links)).ToLowerInvariant();
+        var linksText = string.Join(" ", page.Links.Select(l => l.ToLowerInvariant()));
+        var allText = (string.Join(" ", page.Headings) + " " + buttonsText + " " + linksText).ToLowerInvariant();
 
-        analysis.HasApplyButton = HasAny(buttonsText, "apply", "apply now", "submit application", "start application", "i'm interested");
-        analysis.HasSubmitButton = HasAny(buttonsText, "submit", "submit application", "send application");
+        analysis.HasApplyButton = HasAny(allText, "apply", "apply now", "submit application", "start application", "i'm interested", "i am interested");
+        analysis.HasSubmitButton = HasAny(allText, "submit", "submit application", "send application");
         analysis.HasLoginForm = HasAny(allText, "sign in", "login", "log in");
 
         analysis.HasReviewIndicators = CountMatches(allText, "review", "confirm", "verify your", "summary", "preview your") >= 2;
@@ -88,10 +89,25 @@ public class PageAnalyzer
         if (HasForms(page))
             return PageType.ApplicationForm;
 
+        if (IsApplyUrl(urlLower))
+            return PageType.ApplicationForm;
+
         if (urlLower.Contains("submit") || urlLower.Contains("success") || urlLower.Contains("thank"))
             return PageType.Submitted;
 
         return PageType.Unknown;
+    }
+
+    private static bool IsApplyUrl(string urlLower)
+    {
+        return urlLower.Contains("/apply") ||
+               urlLower.Contains("step=") ||
+               urlLower.Contains("stepname=") ||
+               urlLower.Contains("personalinformation") ||
+               urlLower.Contains("workhistory") ||
+               urlLower.Contains("education") ||
+               urlLower.Contains("application") ||
+               urlLower.Contains("jobapplication");
     }
 
     private static bool HasForms(ExtractedPage page) =>

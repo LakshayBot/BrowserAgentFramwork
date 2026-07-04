@@ -127,13 +127,22 @@ public class PlaywrightSessionManager : IBrowserManager, IAsyncDisposable
         return session;
     }
 
+    internal void SwitchPage(string sessionId, IPage newPage)
+    {
+        if (_sessions.TryGetValue(sessionId, out var session))
+        {
+            session.Page = newPage;
+            _logger.LogInformation("[{SessionId}] Switched to new page: {Url}", sessionId, newPage.Url);
+        }
+    }
+
     internal int GetSessionCount() => _sessions.Count;
 
     internal class Session
     {
         public IBrowser Browser { get; init; } = null!;
         public IBrowserContext Context { get; init; } = null!;
-        public IPage Page { get; init; } = null!;
+        public IPage Page { get; set; } = null!;
         public BrowserOptions Options { get; init; } = null!;
         public DateTime CreatedAt { get; init; }
     }

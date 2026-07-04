@@ -1,6 +1,7 @@
 using BrowserAgent.Api.Application.DTOs.Providers;
 using BrowserAgent.Api.Application.Interfaces;
 using BrowserAgent.Api.Domain.Exceptions;
+using BrowserAgent.Api.Infrastructure.AI;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -30,6 +31,16 @@ public class ProvidersController : ControllerBase
         var userId = User.GetUserId();
         var result = await _providerService.GetAllAsync(userId, ct);
         return Ok(ApiResponse<List<ProviderDto>>.Ok(result));
+    }
+
+    /// <summary>
+    /// Get available provider presets (known base URLs and models).
+    /// </summary>
+    [HttpGet("presets")]
+    [ProducesResponseType(typeof(ApiResponse<List<ProviderPreset>>), StatusCodes.Status200OK)]
+    public IActionResult GetPresets()
+    {
+        return Ok(ApiResponse<List<ProviderPreset>>.Ok(ProviderPresets.All));
     }
 
     /// <summary>
