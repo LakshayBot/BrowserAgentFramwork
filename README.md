@@ -1,4 +1,4 @@
-# Browser Agent Framework
+# Browser Agent Framework ##
 
 [![CI](https://github.com/browser-agent/browser-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/browser-agent/browser-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
